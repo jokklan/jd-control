@@ -73,6 +73,19 @@ module JDownloader
     end
     alias :confirmall :confirm
     
+    def idle?
+      !busy?
+    end
+    
+    def busy?
+      status = self.class.get("/get/grabber/isbusy")
+      if status == "true"
+        return true
+      else
+        return false
+      end
+    end
+    
     # Creates a new package with the given array of links
     def add_link(links)
       links = [links] if links.is_a?(String)
