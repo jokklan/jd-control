@@ -56,10 +56,27 @@ module JDownloader
       return self.class.get("/action/pause") == "Downloads paused"
     end
     
+    # Move an array of link to a package
+    def move_to_package(links, package)
+      links = [links] if links.is_a?(String)
+      self.class.get("/action/grabber/move/"+package+"/"+links.join("+"))
+    end
+    
+    # Confirm links from grapper
+    def confirm(packages = nil)
+      if packages.nil?
+        self.class.get("/action/grabber/confirmall")
+      else
+        packages = [packages] if packages.is_a?(String)
+        self.class.get("/action/grabber/confirm/"+packages.join("/"))
+      end
+    end
+    alias :confirmall :confirm
+    
     # Creates a new package with the given array of links
     def add_link(links)
       links = [links] if links.is_a?(String)
-      self.class.get("/action/add/links/grabber0/start1/"+links.join(" "))
+      self.class.get("/action/add/links/grabber0/start1/"+links.join("+"))
     end
     
     alias :add_links :add_link
@@ -77,19 +94,39 @@ module JDownloader
       self.class.get("/action/add/container/#{dlc_or_file}")
     end
     
-    # Lists the details of any download or downloads (by id) or all downloads.
-    def packages(downloadids = nil)
-      downloadids = [downloadids] if downloadids.is_a?(Integer)
-      
-      dls = parse_packages(self.class.get("/get/downloads/alllist"))
-      if downloadids.nil?
+     # Lists the details of any package or packages (by id) or all packages, in the grapper.
+    def grapper_list(package_names = nil)
+      dls = parse_packages(self.class.get("/get/grapper/list"))
+      if package_names.nil?
         return dls
       else
-        return dls.delete_if {|id, package| not downloadids.include?(id)}
+        return dls.delete_if {|name, package| not package_names.include?(name)}
+      end
+    end
+    alias :grapper :download_list
+    
+    # Lists the details of any download or downloads (by id) or all downloads.
+    def download_list(package_names = nil, type = "all")
+      dls = parse_packages(self.class.get("/get/downloads/"+type+"/list"))
+      if package_names.nil?
+        return dls
+      else
+        return dls.delete_if {|name, package| not package_names.include?(name)}
+      end
+    end
+    alias :downloads :download_list
+    
+    # Lists the details of any download or downloads (by id) or all downloads.
+    def packages(package_names = nil, list = "downloads", type = "all")
+      downloadids = [downloadids] if downloadids.is_a?(Integer)
+      raise ArgumentError, "a"
+      if list == "downloads"
+        dls = download_list(package_names, type)
+      else
+        dls = grapper_list(package_names)
       end
     end
     alias :package :packages
-    alias :downloads :packages
     
     private
     def parse_packages(string)
@@ -99,12 +136,11 @@ module JDownloader
           m = nil
           [i+=1, Package.new({
             :name => package.attributes['package_name'],
-            :id => package.attributes['package_id'].to_i,
             :links => {
               :in_progress => package.attributes['package_linksinprogress'].to_i,
               :in_total => package.attributes['package_linkstotal'].to_i
             },
-            :eta => (package.attributes['package_ETA'] == "00:-1") ? nil : package.attributes['package_ETA'].split(":").reverse.inject(0) { |sum, element| m = ((m.nil?) ? 1 : m*60 ); sum + element.to_i*m },
+            :eta => (package.attributes['package_eta'] == "00:-1") ? nil : package.attributes['package_ETA'].split(":").reverse.inject(0) { |sum, element| m = ((m.nil?) ? 1 : m*60 ); sum + element.to_i*m },
             :speed => package.attributes['package_speed'].split(" ")[0].to_f * parse_bytes(package.attributes['package_speed'].split(" ")[1]),
             :completed => package.attributes['package_percent'].to_f/100,
             :size => {
