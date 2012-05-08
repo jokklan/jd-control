@@ -94,8 +94,12 @@ module JDownloader
       self.class.get("/action/add/container/#{dlc_or_file}")
     end
     
+    ALLOWED_TYPES = ["all", "current", "finished"]
+    ALLOWED_LISTS = ["downloads", "grapper"]
+    
      # Lists the details of any package or packages (by id) or all packages, in the grapper.
     def grapper_list(package_names = nil)
+      package_names = [package_names] if package_names.is_a?(String)
       dls = parse_packages(self.class.get("/get/grapper/list"))
       if package_names.nil?
         return dls
@@ -107,6 +111,8 @@ module JDownloader
     
     # Lists the details of any download or downloads (by id) or all downloads.
     def download_list(package_names = nil, type = "all")
+      raise ArgumentError, "Don't reckonize '#{type}. Must be one of #{ALLOWED_TYPES.join(", ")}." unless ALLOWED_TYPES.include?(list)
+      package_names = [package_names] if package_names.is_a?(String)
       dls = parse_packages(self.class.get("/get/downloads/"+type+"/list"))
       if package_names.nil?
         return dls
@@ -117,9 +123,8 @@ module JDownloader
     alias :downloads :download_list
     
     # Lists the details of any download or downloads (by id) or all downloads.
-    def packages(package_names = nil, list = "downloads", type = "all")
-      downloadids = [downloadids] if downloadids.is_a?(Integer)
-      raise ArgumentError, "a"
+    def packages(package_names = nil, type = "all", list = "downloads")
+      raise ArgumentError, "Don't reckonize '#{list}. Must be one of #{ALLOWED_LISTS.join(", ")}." unless ALLOWED_LISTS.include?(list)
       if list == "downloads"
         dls = download_list(package_names, type)
       else
