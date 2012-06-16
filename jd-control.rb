@@ -57,7 +57,7 @@ module JDownloader
     end
     
     # Move an array of link to a package
-    def move_to_package(links, package)
+    def move_to_package(package, links)
       links = [links] if links.is_a?(String)
       self.class.get("/action/grabber/move/"+package+"/"+links.join("+"))
     end
@@ -79,19 +79,28 @@ module JDownloader
     
     def busy?
       status = self.class.get("/get/grabber/isbusy")
-      if status == "true"
+      if status.to_s == "true"
         return true
       else
         return false
       end
     end
     
+    def remove_all
+      self.class.get("/action/grabber/removeall")
+    end
+    
+    def remove_package(packages)
+      packages = [packages] if packages.is_a?(String)
+      self.class.get("/action/downloads/remove/"+packages.join("/"))
+    end
+    alias :remove_packages :remove_package
+    
     # Creates a new package with the given array of links
     def add_link(links)
       links = [links] if links.is_a?(String)
       self.class.get("/action/add/links/grabber0/start1/"+links.join("+"))
     end
-    
     alias :add_links :add_link
     
     # Will add a DLC to the download queue, pass the DLC or a local file
@@ -111,20 +120,20 @@ module JDownloader
     ALLOWED_LISTS = ["downloads", "grapper"]
     
      # Lists the details of any package or packages (by id) or all packages, in the grapper.
-    def grapper_list(package_names = nil)
+    def grabber_list(package_names = nil)
       package_names = [package_names] if package_names.is_a?(String)
-      dls = parse_packages(self.class.get("/get/grapper/list"))
+      dls = parse_grabber_packages(self.class.get("/get/grabber/list"))
       if package_names.nil?
         return dls
       else
         return dls.delete_if {|name, package| not package_names.include?(name)}
       end
     end
-    alias :grapper :download_list
+    alias :grabber :grabber_list
     
     # Lists the details of any download or downloads (by id) or all downloads.
     def download_list(package_names = nil, type = "all")
-      raise ArgumentError, "Don't reckonize '#{type}. Must be one of #{ALLOWED_TYPES.join(", ")}." unless ALLOWED_TYPES.include?(list)
+      raise ArgumentError, "Don't reckonize '#{type}. Must be one of #{ALLOWED_TYPES.join(", ")}." unless ALLOWED_TYPES.include?(type)
       package_names = [package_names] if package_names.is_a?(String)
       dls = parse_packages(self.class.get("/get/downloads/"+type+"/list"))
       if package_names.nil?
@@ -147,12 +156,37 @@ module JDownloader
     alias :package :packages
     
     private
+    def parse_grabber_packages(string)
+      return {} if string.nil?
+      Array[*Hpricot(string).search("packages").collect { |package|
+          m = nil
+          [Package.new({
+            :type => :grabber,
+            :name => package.attributes['package_name'],
+            :links => {
+              :in_total => package.attributes['package_linkstotal'].to_i
+            },
+            :files => Array[*package.search("file").collect { |file|
+              [JDownloader::File.new({
+                :url => {:browser => file.attributes['file_browser_url'], :download => file.attributes['file_download_url'] },
+                :name => file.attributes['file_name'],
+                :hoster => file.attributes['file_hoster'],
+                :status => parse_status(file.attributes['file_status']),
+                :size => file.attributes['file_size'],
+              })]
+            }.flatten]
+            
+          })]
+        }.flatten
+      ]
+    end
+    
     def parse_packages(string)
       return {} if string.nil?
-      i = -1
-      Hash[*Hpricot(string).search("package").collect { |package|
+      Array[*Hpricot(string).search("packages").collect { |package|
           m = nil
-          [i+=1, Package.new({
+          [Package.new({
+            :type => :download,
             :name => package.attributes['package_name'],
             :links => {
               :in_progress => package.attributes['package_linksinprogress'].to_i,
@@ -166,14 +200,14 @@ module JDownloader
               :total => package.attributes['package_size'].split(" ")[0].to_f * parse_bytes(package.attributes['package_size'].split(" ")[1]),
               :todo => package.attributes['package_todo'].split(" ")[0].to_f * parse_bytes(package.attributes['package_todo'].split(" ")[1])
             },
-            :files => Hash[*package.search("file").collect { |file|
-              [file.attributes['file_id'].to_i,JDownloader::File.new({
+            :files => Array[*package.search("file").collect { |file|
+              [JDownloader::File.new({
                 :name => file.attributes['file_name'],
-                :id => file.attributes['file_id'].to_i,
                 #:package_id => file.attributes['file_package'].to_i,
                 :completed => file.attributes['file_percent'].to_f/100,
                 :hoster => file.attributes['file_hoster'],
                 :status => parse_status(file.attributes['file_status']),
+                :size => file.attributes['file_size'],
                 #:speed => (file.attributes['file_speed'] == "-1") ? nil : file.attributes['file_speed'].to_i
               })]
             }.flatten]
@@ -185,11 +219,11 @@ module JDownloader
     
     def parse_bytes(bytes)
       case bytes
-      when "GB","GB/s"
+      when "GB","GB/s", "GiB"
         return 1048576
-      when "MB","MB/s"
+      when "MB","MB/s", "MiB"
         return 1024
-      when "KB","KB/s"
+      when "KB","KB/s", "KiB"
         return 1
       when "B","B/s"
         return 1/1024
@@ -236,23 +270,28 @@ module JDownloader
           :description => "Unknown"
         }
       else
-        status
+        {
+          :description => status
+        }
       end
     end
   end
   
   # JDownloader packages contain files, this class allows interrogation of the files
   class File
-    attr_reader :name, :id, :hoster, :status, :completed, :speed, :eta
+    attr_reader :name, :id, :hoster, :status, :completed, :speed, :eta, :size
     def initialize(f)
+            # raise f.to_yaml
       @name = f[:name]
-      @id = f[:id]
       @hoster = f[:hoster]
       @status = f[:status]
-      @completed = Percentage.new(f[:completed])
+      @completed = Percentage.new(f[:completed]) if f[:completed]
       @status = {:description => :finished} if @completed == 1
       @speed = f[:status][:speed] if not f[:status][:speed].nil?
       @eta = f[:status][:time] if not f[:status][:time].nil?
+      @size = f[:size]
+      @download_url = f[:url][:download] unless f[:url].nil?
+      @browser_url = f[:url][:browser] unless f[:url].nil?
     end
     
     # Is the file waiting to be downloaded?
@@ -266,26 +305,43 @@ module JDownloader
     end
     alias :completed? :finished?
     
-    def inspect
-      "#{@name}"
-    end
+    # def inspect
+    #   "#{@name}"
+    # end
   end
   
   # JDownloader packages can be accessed as objects, they're almost totally intuitive
   class Package
     attr_reader :name, :id, :eta, :speed, :completed, :size, :files, :status
     def initialize(p)
+      @type = p[:type]
       @name = p[:name]
-      @id = p[:id]
-      #@package = p[:package_id]
-      @eta = (p[:completed] >= 1.0) ? "finished" : (p[:eta].nil?)? "unknown" : ETA.new(p[:eta])
-      @speed = p[:speed]
-      @completed = Percentage.new(p[:completed])
+      @size = p[:size]
+      @eta = (p[:completed] >= 1.0) ? "finished" : (p[:eta].nil?)? "unknown" : ETA.new(p[:eta]) if @type == :download
+      @speed = p[:speed] if @type == :download
+      @completed = Percentage.new(p[:completed]) if @type == :download
       @files = p[:files]
     end
     
-    def inspect
-      "#{@completed} of '#{@name}' ETA #{@eta}"
+    # def inspect
+    #   if @type == :download
+    #     "#{@completed} of '#{@name}' ETA #{@eta}"
+    #   else
+    #     "'#{@name}'"
+    #   end
+    # end
+    
+    def finished?
+      @eta == "finished"
     end
+    
+    def rename(new_name)
+      self.class.get("/action/grabber/rename/"+@name+"/"+new_name)
+    end
+    
+    def confirm
+      self.class.get("/action/grabber/confirm/"+name)
+    end
+    
   end
 end
